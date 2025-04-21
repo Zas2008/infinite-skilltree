@@ -1,0 +1,216 @@
+<script>
+  const treeEl = document.getElementById('tree');
+  const pointsEl = document.getElementById('points');
+  const rateEl = document.getElementById('rate');
+  const connectorsSVG = document.getElementById('connectors');
+  const inventoryEl = document.getElementById('inventory-list');
+  const restartButton = document.getElementById('restart');
+
+  let points = 0;
+  let rate = 1;
+  let skills = [];
+  let inventory = [];
+  let words = [];  // To store words from the JSON
+
+  const currencies = {
+    gold: 0,
+    gems: 0,
+    crystals: 0,
+    orbs: 0,
+    shards: 0
+  };
+
+  const currencyRates = {
+    gold: 1,
+    gems: 1,
+    crystals: 1,
+    orbs: 1,
+    shards: 1
+  };
+
+  const currencyNames = Object.keys(currencies);
+
+  const rarities = [
+    { name: 'common', color: '#aaa' },
+    { name: 'uncommon', color: '#3f3' },
+    { name: 'rare', color: '#39f' },
+    { name: 'epic', color: '#c3f' },
+    { name: 'legendary', color: 'orange' }
+  ];
+
+  // Fetch words from the words.json file
+  const loadWords = async () => {
+    try {
+      const response = await fetch('words.json');
+      const data = await response.json();
+      words = data;
+      startGame();
+    } catch (error) {
+      console.error("Error loading words.json:", error);
+      alert("Failed to load words, using default set.");
+      words = ["Fire", "Ice", "Wind", "Shadow", "Power", "Mind"]; // Fallback words if JSON load fails
+      startGame();
+    }
+  };
+
+  const save = () => {
+    localStorage.setItem('skilltree-data', JSON.stringify({ skills, inventory }));
+  };
+
+  const load = () => {
+    const data = JSON.parse(localStorage.getItem('skilltree-data'));
+    if (data) {
+      skills = data.skills || [];
+      inventory = data.inventory || [];
+    }
+  };
+
+  const randomName = () => {
+    return words[Math.floor(Math.random() * words.length)] + " " +
+           words[Math.floor(Math.random() * words.length)];
+  };
+
+  const createSkill = (depth = 0) => {
+    const id = skills.length;
+    const cost = Math.floor(10 * Math.pow(1.4, depth + 1));
+    const bonus = Math.ceil(1 * Math.pow(1.4, depth + 1));
+    const name = randomName();
+    const currency = currencyNames[Math.floor(Math.random() * currencyNames.length)];
+    const rarity = rarities[Math.min(Math.floor(depth / 3), rarities.length - 1)];
+
+    const skill = {
+      id,
+      name,
+      cost,
+      bonus,
+      currency,
+      unlocked: false,
+      parents: [],
+      rarity: rarity.name
+    };
+
+    if (id > 0) {
+      const parentId = Math.floor(Math.random() * id);
+      skill.parents.push(parentId);
+    }
+
+    skills.push(skill);
+    return skill;
+  };
+
+  const renderConnectors = () => {
+    connectorsSVG.innerHTML = '';
+    const skillDivs = document.querySelectorAll('.skill');
+
+    skills.forEach((skill, i) => {
+      const skillEl = skillDivs[i];
+      if (!skillEl) return;
+
+      const rect1 = skillEl.getBoundingClientRect();
+
+      skill.parents.forEach(parentId => {
+        const parentEl = skillDivs[parentId];
+        if (!parentEl) return;
+
+        const rect2 = parentEl.getBoundingClientRect();
+
+        const x1 = rect2.left + rect2.width / 2 + window.scrollX;
+        const y1 = rect2.top + rect2.height + window.scrollY;
+        const x2 = rect1.left + rect1.width / 2 + window.scrollX;
+        const y2 = rect1.top + window.scrollY;
+
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', x1);
+        line.setAttribute('y1', y1);
+        line.setAttribute('x2', x2);
+        line.setAttribute('y2', y2);
+        line.setAttribute('stroke', '#888');
+        connectorsSVG.appendChild(line);
+      });
+    });
+  };
+
+  const renderInventory = () => {
+    inventoryEl.innerHTML = '';
+    inventory.forEach(skill => {
+      const div = document.createElement('div');
+      div.className = 'inventory-item';
+      div.textContent = `${skill.name} (${skill.rarity}) [+${skill.bonus}/sec]`;
+      inventoryEl.appendChild(div);
+    });
+  };
+
+  const renderSkills = () => {
+    treeEl.innerHTML = '';
+    skills.forEach(skill => {
+      const el = document.createElement('div');
+      el.className = `skill ${skill.rarity}`;
+      el.innerHTML = `<strong>${skill.name}</strong><br>
+        💰${skill.cost} ${skill.currency}<br>
+        ⬆️ +${skill.bonus}/sec<br>
+        <em>${skill.rarity}</em>`;
+
+      if (skill.unlocked) {
+        el.classList.add('unlocked');
+      } else {
+        const unlockedParents = skill.parents.every(p => skills[p]?.unlocked);
+        if (!unlockedParents) el.classList.add('locked');
+        el.onclick = () => {
+          if (currencies[skill.currency] >= skill.cost) {
+            currencies[skill.currency] -= skill.cost;
+            rate += skill.bonus;
+            skill.unlocked = true;
+            inventory.push(skill);
+            for (let i = 0; i < 2; i++) createSkill(skill.id);
+            renderSkills();
+            renderInventory();
+            updateDisplay();
+            save();
+          }
+        };
+      }
+
+      treeEl.appendChild(el);
+    });
+
+    setTimeout(renderConnectors, 100);
+  };
+
+  const updateDisplay = () => {
+    const currencyDisplay = Object.entries(currencies)
+      .map(([key, value]) => `${key}: ${Math.floor(value)}`)
+      .join(" | ");
+    pointsEl.textContent = currencyDisplay;
+    rateEl.textContent = rate.toFixed(2);
+  };
+
+  const gameLoop = () => {
+    for (let key in currencies) {
+      currencies[key] += currencyRates[key];
+    }
+    updateDisplay();
+    save();
+  };
+
+  // Restart game logic
+  const restartGame = () => {
+    localStorage.clear();
+    location.reload();
+  };
+
+  restartButton.addEventListener('click', restartGame);
+
+  const startGame = () => {
+    load();
+    if (skills.length === 0) {
+      for (let i = 0; i < 4; i++) createSkill(0);
+    }
+    renderSkills();
+    renderInventory();
+    updateDisplay();
+    setInterval(gameLoop, 1000);
+  };
+
+  // Fetch words and then start game
+  loadWords();
+</script>
